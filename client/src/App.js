@@ -19,7 +19,7 @@ import './App.css';
 
 // Determine server URL dynamically. This works for both localhost and local network access.
 const serverHostname = window.location.hostname;
-const serverUrl = process.env.NODE_ENV === 'production' ? 'https://cricket-auction-server.onrender.com' : `http://${serverHostname}:3001`; // <-- REPLACE WITH YOUR RENDER URL
+const serverUrl = process.env.NODE_ENV === 'production' ? 'http://65.1.148.141:3001' : `http://${serverHostname}:3001`;
 const socket = io(serverUrl);
 
 function App() {
