@@ -33,13 +33,8 @@ const localIp = getLocalIpAddress();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: [
-      "http://localhost:3000", 
-      `http://${localIp}:3000`,
-      // Add the public IP of your EC2 instance for the frontend
-      "http://65.1.148.141:3000", 
-      "https://cricket-auction-87bdf.web.app" // Add your deployed frontend URL here
-    ],
+    // Temporarily allow all origins for debugging purposes
+    origin: "*",
     methods: ["GET", "POST"]
   }
 });
