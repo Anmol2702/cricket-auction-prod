@@ -1,0 +1,59 @@
+.auction-log {
+  background-color: #f4f4f9;
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.auction-log h2 {
+  margin-top: 0;
+  color: #333;
+  border-bottom: 2px solid #ddd;
+  padding-bottom: 8px;
+  font-size: 1.2rem;
+}
+
+.log-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.log-entry {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.log-entry.sold {
+  background-color: #e8f5e9; /* Light green */
+  border-left: 4px solid #4caf50; /* Green */
+}
+
+.log-entry.unsold {
+  background-color: #fff3e0; /* Light orange */
+  border-left: 4px solid #ff9800; /* Orange */
+}
+
+.log-entry.sold.clickable {
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.log-entry.sold.clickable:hover {
+  background-color: #dcfce0;
+}
+
+.log-entry .player-name {
+  font-weight: 500;
+}
+
+.log-entry .sale-info {
+  color: #555;
+}

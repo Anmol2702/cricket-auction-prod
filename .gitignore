@@ -1,0 +1,18 @@
+# Dependencies
+/node_modules
+/client/node_modules
+/server/node_modules
+/client/build
+
+# Environment files
+.env
+client/.env
+server/.env
+
+# Firebase credentials (VERY IMPORTANT for security)
+server/serviceAccountKey.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

@@ -1,0 +1,40 @@
+.tabs-container {
+  width: 100%;
+  margin-top: 20px;
+}
+
+.tabs-list {
+  display: flex;
+  border-bottom: 2px solid #ddd;
+  margin-bottom: 20px;
+  overflow-x: auto;
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.tabs-list::-webkit-scrollbar {
+  display: none; /* Chrome, Safari and Opera */
+}
+
+.tab-item {
+  padding: 10px 20px;
+  cursor: pointer;
+  border: none;
+  background-color: transparent;
+  font-size: 1rem;
+  font-weight: 500;
+  color: #6c757d;
+  position: relative;
+  bottom: -2px;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+
+.tab-item.active {
+  color: #007bff;
+  border-bottom-color: #007bff;
+}
+
+.tab-content {
+  /* The content inside will have its own padding/margins */
+}

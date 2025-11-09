@@ -1,0 +1,80 @@
+.player-spotlight-container {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    text-align: center;
+}
+  
+.spotlight-card {
+    border: 2px solid #007bff;
+    padding: 20px;
+    border-radius: 8px;
+    background-color: #f8f9fa;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    align-items: center;
+}
+  
+.spotlight-card.placeholder {
+    border-style: dashed;
+    color: #6c757d;
+    grid-template-columns: 1fr;
+}
+
+.player-info h2 {
+    margin: 0 0 10px 0;
+    font-size: 2rem;
+}
+
+.player-info p {
+    margin: 0 0 10px 0;
+    color: #6c757d;
+}
+
+.bidding-info {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+  
+.base-price {
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: #28a745;
+}
+
+.current-bid-spotlight, .leading-team-spotlight {
+    text-align: center;
+}
+
+.current-bid-spotlight p, .leading-team-spotlight p {
+    margin: 0 0 5px 0;
+    color: #6c757d;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+}
+  
+.bid-amount-spotlight {
+    font-size: 2.5rem;
+    font-weight: bold;
+    color: #007bff;
+}
+  
+.team-name-spotlight {
+    font-size: 1.5rem;
+    font-weight: 500;
+}
+
+@media (max-width: 800px) {
+  .spotlight-card {
+    grid-template-columns: 1fr;
+  }
+
+  .bidding-info {
+    border-top: 1px solid #e9ecef;
+    padding-top: 20px;
+    margin-top: 10px;
+  }
+}
