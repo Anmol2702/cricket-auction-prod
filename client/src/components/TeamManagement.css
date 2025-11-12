@@ -1,0 +1,31 @@
+.team-management-container {
+  padding: 1rem;
+  background-color: #fff;
+  margin: 1rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.team-list-table-container {
+  overflow-x: auto;
+}
+.team-management-container table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+.team-management-container th, .team-management-container td {
+  border: 1px solid #ddd;
+  padding: 12px;
+  text-align: left;
+}
+.team-management-container th {
+  background-color: #f8f9fa;
+}
+.team-actions .edit-btn {
+  padding: 5px 10px;
+  background-color: #ffc107;
+  color: black;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}

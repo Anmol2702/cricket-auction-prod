@@ -330,6 +330,34 @@ body {
   background-color: #6c757d;
   cursor: not-allowed;
 }
+
+.mock-btn {
+  background-color: #fd7e14; /* Orange */
+  color: white;
+  border: none;
+  padding: 10px 30px;
+  border-radius: 5px;
+  font-size: 1.2rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.hardcode-btn {
+  background-color: #6f42c1; /* A distinct purple */
+  color: white;
+  border: none;
+  padding: 10px 30px;
+  border-radius: 5px;
+  font-size: 1.2rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.hardcode-btn:hover {
+  background-color: #5a379b; /* Darker purple on hover */
+}
 /* -------------------------------------- */
 
 /* --- NEW STYLES for Random Nominate Button --- */
@@ -364,12 +392,32 @@ body {
   font-weight: bold;
   cursor: pointer;
   transition: background-color 0.2s;
-  grid-column: 1 / -1; /* Make the button span both columns */
-  margin-top: 10px;
+  /* No longer spans full width to fit in the new 2x2 grid */
 }
 
 .reset-btn:hover {
   background-color: #5a6268;
+}
+
+.start-round-btn {
+  background-color: #28a745; /* Green, for a positive action */
+  color: white;
+  border: none;
+  padding: 10px 30px;
+  border-radius: 5px;
+  font-size: 1.2rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.start-round-btn:hover:not(:disabled) {
+  background-color: #218838; /* Darker green */
+}
+
+.start-round-btn:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
 }
 
 .team-booster-btn {
@@ -528,6 +576,25 @@ body {
 .logout-button:hover {
   background-color: white;
   color: #1e3c72;
+}
+
+.login-button {
+  background-color: #28a745; /* A welcoming green */
+  color: white;
+  border: none;
+  border-radius: 20px;
+  padding: 10px 20px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.login-button:hover {
+  background-color: #218838; /* A darker green on hover */
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
 }
 
 .view-toggle-container {

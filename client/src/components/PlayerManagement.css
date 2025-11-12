@@ -108,6 +108,29 @@
     color: white;
   }
   
+  .player-actions .assign-btn {
+    background-color: #17a2b8; /* A teal/cyan color */
+    color: white;
+    margin: 0 5px;
+  }
+  
+  .player-actions .make-unsold-btn {
+    background-color: #ffc107; /* A warning yellow color */
+    color: black;
+  }
+  
+  .player-actions .reassign-btn {
+    background-color: #6f42c1; /* A purple color */
+    color: white;
+    margin: 0 5px;
+  }
+  
+  .player-actions .make-available-btn {
+    background-color: #007bff; /* A primary blue color */
+    color: white;
+    margin: 0 5px;
+  }
+  
   .player-import-card p {
     margin-top: 0;
     margin-bottom: 15px;

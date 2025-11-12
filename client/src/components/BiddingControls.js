@@ -26,12 +26,28 @@ function BiddingControls({ onBid, user, leadingTeamId, currentPlayer }) {
   const maxBid = user.maxBid || 0;
   const canAfford = maxBid >= nextBid;
 
+  // NEW VALIDATION: Check if the team has reached the player category limit.
+  let hasReachedCategoryLimit = false;
+  let categoryLimitReason = '';
+  if (currentPlayer && currentPlayer.category && settings) {
+    const categoryKey = `${currentPlayer.category.toLowerCase()}PlayersCount`;
+    // The setting is named 'min' but we are treating it as a max limit per user request
+    const maxAllowed = settings[`min${currentPlayer.category}Players`]; 
+    const currentCategoryCount = user[categoryKey] || 0;
+    
+    if (currentCategoryCount >= maxAllowed) {
+      hasReachedCategoryLimit = true;
+      categoryLimitReason = `You have reached the maximum of ${maxAllowed} ${currentPlayer.category} players.`;
+    }
+  }
+
   let disabledReason = '';
   if (!currentPlayer) disabledReason = 'No player is being auctioned.';
   else if (isLeading) disabledReason = 'You are the leading bidder.';
   else if (!canAfford) disabledReason = `You cannot afford the next bid of ₹${nextBid}. (Max: ₹${maxBid})`;
+  else if (hasReachedCategoryLimit) disabledReason = categoryLimitReason;
 
-  const isDisabled = !currentPlayer || isLeading || !canAfford;
+  const isDisabled = !currentPlayer || isLeading || !canAfford || hasReachedCategoryLimit;
 
   return (
     <div className="bidding-controls-container" title={disabledReason}>

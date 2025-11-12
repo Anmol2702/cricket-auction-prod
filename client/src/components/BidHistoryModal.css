@@ -4,54 +4,130 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.6);
+  background-color: rgba(0, 0, 0, 0.7);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 1000;
+  animation: fadeIn 0.3s forwards;
+}
+
+@keyframes fadeIn {
+  to {
+    opacity: 1;
+  }
 }
 
 .modal-content {
-  background: white;
-  padding: 20px 30px;
-  border-radius: 8px;
+  background: #ffffff;
+  padding: 1.5rem;
+  border-radius: 10px;
   width: 90%;
-  max-width: 500px;
+  max-width: 400px; /* Made it more compact */
   position: relative;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  transform: scale(0.98);
+  animation: scaleUp 0.3s cubic-bezier(0.165, 0.84, 0.44, 1) forwards;
+}
+
+@keyframes scaleUp {
+  to {
+    transform: scale(1);
+  }
 }
 
 .modal-close {
   position: absolute;
   top: 10px;
-  right: 15px;
-  background: none;
+  right: 10px;
+  background: #f1f1f1;
   border: none;
-  font-size: 2rem;
+  font-size: 1rem;
   cursor: pointer;
-  color: #aaa;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s, transform 0.2s;
+  color: #888;
+}
+
+.modal-close:hover {
+  background-color: #ddd;
+  transform: scale(1.1);
 }
 
 .modal-content h2 {
   margin-top: 0;
+  font-size: 1.25rem; /* Reduced size */
+  color: #333;
+  text-align: center;
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.25rem;
+  font-weight: 600;
+  border-bottom: 1px solid #e9ecef;
 }
 
-.bid-list {
-  list-style: none;
-  padding: 0;
+.bid-history-modal .bid-history-list {
+  max-height: 250px;
   overflow-y: auto;
-  margin-top: 15px;
+  margin-top: 1rem;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background-color: #f8f9fa;
+  padding: 5px;
 }
 
-.bid-item {
+.bid-entry {
   display: flex;
   justify-content: space-between;
-  padding: 10px;
-  border-bottom: 1px solid #eee;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e9ecef;
 }
 
-.bid-item:last-child {
+.bid-entry:last-child {
   border-bottom: none;
+}
+
+.bid-team-name {
+  font-weight: 500;
+  color: #444;
+}
+
+.bid-amount {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-weight: 600;
+  color: #111;
+}
+
+.final-price {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 2px solid #28a745;
+  text-align: center;
+}
+
+.final-price .label {
+  display: block;
+  font-size: 0.8rem;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.final-price .price-value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #28a745;
+}
+
+.final-price .team-value {
+  display: block;
+  margin-top: 4px;
+  font-size: 1rem;
+  color: #495057;
 }

@@ -47,7 +47,7 @@ function TeamDashboard({ teams, leadingTeamId, user, onApplyBooster }) {
                   <ul>
                     {team.squad.length > 0 ? (
                       team.squad.map(player => (
-                        <li key={player.id}>{player.name} - ₹{player.price}</li>
+                        <li key={player.id}>{player.name} - ₹{player.sellingPrice}</li>
                       ))
                     ) : (
                       <li>No players bought yet.</li>

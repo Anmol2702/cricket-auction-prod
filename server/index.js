@@ -29,11 +29,15 @@ function getLocalIpAddress() {
   return 'localhost'; // Fallback
 }
 
+// Helper function to introduce a delay
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 const localIp = getLocalIpAddress();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    // Temporarily allow all origins for debugging purposes
+    // Allow all origins for local development to prevent connection issues.
+    // The previous, more specific configuration is still correct for your EC2 deployment.
     origin: "*",
     methods: ["GET", "POST"]
   }
@@ -79,15 +83,24 @@ function stopTimer() {
   io.emit('timer_update', timeLeft);
 }
 
-async function handleSellPlayerTransaction(player, currentBid, leadingTeamId, bidHistory) {
-  await db.runTransaction(async (transaction) => {
+function generatePassword(length = 8) {
+  // In a real-world app, use a more secure method for password generation.
+  const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let retVal = "";
+  for (let i = 0, n = charset.length; i < length; ++i) {
+    retVal += charset.charAt(Math.floor(Math.random() * n));
+  }
+  return retVal;
+}
+
+async function handleSellPlayerTransaction(player, currentBid, leadingTeamId, bidHistory, existingTransaction = null) {
+  const sellLogic = async (transaction) => {
     const teamRef = db.collection('teams').doc(leadingTeamId);
     const playerRef = db.collection('players').doc(player.id);
     const teamDoc = await transaction.get(teamRef);
 
     if (!teamDoc.exists) throw "Team document does not exist!";
 
-    const teamData = teamDoc.data();
     const newPurse = teamDoc.data().purse - currentBid;
     const newPointsSpent = teamDoc.data().pointsSpent + currentBid;
 
@@ -95,11 +108,12 @@ async function handleSellPlayerTransaction(player, currentBid, leadingTeamId, bi
     // Add fields to your team document to track player counts directly.
     // This avoids expensive queries in the calculateMaxBidForTeam function.
     const updates = { purse: newPurse, pointsSpent: newPointsSpent };
-    if (player.category === 'Platinum') {
+    const category = player.category || 'Gold'; // Default to Gold if undefined
+    if (category === 'Platinum') {
       updates.platinumPlayersCount = admin.firestore.FieldValue.increment(1);
-    } else if (player.category === 'Gold') {
+    } else if (category === 'Gold') {
       updates.goldPlayersCount = admin.firestore.FieldValue.increment(1);
-    } else if (player.category === 'Diamond') {
+    } else if (category === 'Diamond') {
       updates.diamondPlayersCount = admin.firestore.FieldValue.increment(1);
     }
     transaction.update(teamRef, updates);
@@ -107,11 +121,19 @@ async function handleSellPlayerTransaction(player, currentBid, leadingTeamId, bi
     transaction.update(playerRef, {
       status: 'sold',
       sellingPrice: currentBid,
-      teamId: leadingTeamId,
+      teamId: leadingTeamId, // Changed from soldTo to teamId for consistency
       soldAt: admin.firestore.FieldValue.serverTimestamp(),
       bidHistory: bidHistory
     });
-  });
+  };
+
+  if (existingTransaction) {
+    // If we are already inside a transaction, use it.
+    await sellLogic(existingTransaction);
+  } else {
+    // Otherwise, create a new transaction.
+    await db.runTransaction(sellLogic);
+  }
 }
 
 async function sellPlayer() {
@@ -176,43 +198,100 @@ function getBidIncrement(currentBid) {
   return increments[increments.length - 1].step;
 }
 
-async function calculateMaxBidForTeam(teamData, teamId) {
+async function calculateMaxBidForTeam(teamData, teamId, currentPlayer) {
   const settings = currentAuction.settings;
-
-  // Query for players sold to this team
-  const squadSnapshot = await db.collection('players').where('teamId', '==', teamId).where('status', '==', 'sold').get();
-  const squad = squadSnapshot.docs.map(doc => doc.data());
 
   // With denormalization, you can read these counts directly from the team document, avoiding the query above.
   const currentPlatinumCount = teamData.platinumPlayersCount || 0;
   const currentGoldCount = teamData.goldPlayersCount || 0;
   const currentDiamondCount = teamData.diamondPlayersCount || 0;
 
-  const platinumSlotsToFill = Math.max(0, settings.minPlatinumPlayers - currentPlatinumCount);
-  const goldSlotsToFill = Math.max(0, settings.minGoldPlayers - currentGoldCount);
-  const diamondSlotsToFill = Math.max(0, settings.minDiamondPlayers - currentDiamondCount);
+  let diamondSlotsToFill = Math.max(0, settings.minDiamondPlayers - currentDiamondCount);
+  let platinumSlotsToFill = Math.max(0, settings.minPlatinumPlayers - currentPlatinumCount);
+  let goldSlotsToFill = Math.max(0, settings.minGoldPlayers - currentGoldCount);
 
-  const moneyToReserveForPlatinum = platinumSlotsToFill * settings.platinumBasePrice;
-  const moneyToReserveForGold = goldSlotsToFill * settings.goldBasePrice;
-  const moneyToReserveForDiamond = diamondSlotsToFill * settings.diamondBasePrice;
-  const totalMoneyToReserve = moneyToReserveForPlatinum + moneyToReserveForGold + moneyToReserveForDiamond;
-
-  const disposableCash = teamData.purse - totalMoneyToReserve;
-
-  let highestBasePriceNeeded = 0;
-  if (platinumSlotsToFill > 0) {
-    highestBasePriceNeeded = Math.max(highestBasePriceNeeded, settings.platinumBasePrice);
-  }
-  if (goldSlotsToFill > 0) {
-    highestBasePriceNeeded = Math.max(highestBasePriceNeeded, settings.goldBasePrice);
-  }
-  if (diamondSlotsToFill > 0) {
-    highestBasePriceNeeded = Math.max(highestBasePriceNeeded, settings.diamondBasePrice);
+  // If we are bidding on a player that fills a required slot,
+  // we don't need to reserve money for that slot in this calculation.
+  if (currentPlayer) {
+    const category = currentPlayer.category;
+    if (category === 'Diamond' && diamondSlotsToFill > 0) diamondSlotsToFill--;
+    else if (category === 'Platinum' && platinumSlotsToFill > 0) platinumSlotsToFill--;
+    else if (category === 'Gold' && goldSlotsToFill > 0) goldSlotsToFill--;
   }
 
-  const maxBid = disposableCash + highestBasePriceNeeded;
+  const moneyToReserve = 
+    (diamondSlotsToFill * settings.diamondBasePrice) +
+    (platinumSlotsToFill * settings.platinumBasePrice) +
+    (goldSlotsToFill * settings.goldBasePrice);
+
+  const maxBid = teamData.purse - moneyToReserve;
 
   return maxBid > 0 ? maxBid : 0;
+}
+
+async function getNominationPool(isFixedAuction) {
+    const playersRef = db.collection('players');
+    let availablePlayersSnapshot = await playersRef.where('status', '==', 'available').get();
+
+    // If the available pool is empty, try to start a new round with unsold players.
+    if (availablePlayersSnapshot.empty) {
+        const unsoldSnapshot = await playersRef.where('status', '==', 'unsold').get();
+        if (!unsoldSnapshot.empty) {
+            console.log('[getNominationPool] No available players. Starting a new round with unsold players.');
+            const batch = db.batch();
+            unsoldSnapshot.docs.forEach(doc => batch.update(doc.ref, { status: 'available' }));
+            await batch.commit();
+            io.emit('new_round_started');
+            await sleep(500); // Give clients time to update state
+            availablePlayersSnapshot = await playersRef.where('status', '==', 'available').get();
+        }
+    }
+
+    if (availablePlayersSnapshot.empty) {
+        return []; // No players left at all
+    }
+
+    let nominationPool = availablePlayersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    // If it's a fixed auction, apply the holding logic
+    if (isFixedAuction) {
+        console.log('[getNominationPool] Fixed Auction Mode Detected. Applying hold-back rules.');
+
+        let heldBackPlayerNames = [
+            'Anmol Khilwani', 'Shubam Chichar', 'Karan Shadija', 'Sourabh Raheja',
+            'Mohit Tolani', 'Raghav Sahu', 'Piyush Jain', 'Rahul Rawat',
+            'Rishabh', 'Karan Lekhwani', 'Kishan Bajaj', 'Uman'
+        ].map(name => name.toLowerCase());
+
+        const allPlayersSnapshot = await playersRef.get();
+        const soldPlayersSnapshot = await playersRef.where('status', '==', 'sold').get();
+
+        // Vicky Goklani Rule
+        const soldPlatinumCount = soldPlayersSnapshot.docs.filter(doc => doc.data().category === 'Platinum').length;
+        if (soldPlatinumCount < 4) {
+            heldBackPlayerNames.push('vicky goklani');
+        }
+
+        // Hitesh Chothwani Rule
+        if (nominationPool.length > 5) {
+            heldBackPlayerNames.push('hitesh chothwani');
+        }
+
+        const totalPlayersCount = allPlayersSnapshot.size;
+        const soldPlayersCount = soldPlayersSnapshot.size;
+        const LATE_PHASE_THRESHOLD = 0.6;
+
+        if (totalPlayersCount > 0 && (soldPlayersCount / totalPlayersCount) < LATE_PHASE_THRESHOLD) {
+            const normalPlayers = nominationPool.filter(p => !heldBackPlayerNames.includes(p.name.toLowerCase()));
+            if (normalPlayers.length > 0) {
+                console.log(`[getNominationPool] Early Phase. Nominating from ${normalPlayers.length} normal players.`);
+                return normalPlayers;
+            }
+        }
+        console.log(`[getNominationPool] Late Phase. All ${nominationPool.length} available players are eligible.`);
+    }
+
+    return nominationPool;
 }
 
 async function initializeAuctionState() {
@@ -278,37 +357,19 @@ io.on('connection', (socket) => {
   });
 
   socket.on('nominate_random_player', async () => {
-    const playersRef = db.collection('players');
-    let snapshot = await playersRef.where('status', '==', 'available').get();
+    const auctioneerRef = db.collection('users').doc('auctioneer');
+    const auctioneerDoc = await auctioneerRef.get();
+    const isFixedAuction = auctioneerDoc.exists && auctioneerDoc.data().password === 'Anmol0503';
 
-    // If no 'available' players, check for 'unsold' players and reset them
-    if (snapshot.empty) {
-      const unsoldSnapshot = await playersRef.where('status', '==', 'unsold').get();
+    const nominationPool = await getNominationPool(isFixedAuction);
 
-      if (!unsoldSnapshot.empty) {
-        const batch = db.batch();
-        unsoldSnapshot.docs.forEach(doc => {
-          batch.update(doc.ref, { status: 'available' });
-        });
-        await batch.commit();
-
-        // Notify clients and re-fetch
-        io.emit('new_round_started');
-        console.log('New round started. Unsold players are now available.');
-        await new Promise(resolve => setTimeout(resolve, 500)); // Give clients a moment
-        snapshot = await playersRef.where('status', '==', 'available').get();
-      }
-    }
-
-    if (snapshot.empty) {
+    if (nominationPool.length === 0) {
       console.log('No available players to nominate.');
       io.emit('no_players_available');
       return;
     }
 
-    const availablePlayers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    const randomIndex = Math.floor(Math.random() * availablePlayers.length);
-    const player = availablePlayers[randomIndex];
+    const player = nominationPool[Math.floor(Math.random() * nominationPool.length)];
 
     // Set base price based on category from settings
     if (player.category === 'Platinum') {
@@ -331,6 +392,19 @@ io.on('connection', (socket) => {
       leadingTeamId: currentAuction.leadingTeamId
     });
     startTimer();
+  });
+
+  socket.on('start_new_round', async () => {
+    const unsoldSnapshot = await db.collection('players').where('status', '==', 'unsold').get();
+    if (unsoldSnapshot.empty) {
+      socket.emit('bid_error', 'There are no unsold players to start a new round with.');
+      return;
+    }
+    const batch = db.batch();
+    unsoldSnapshot.docs.forEach(doc => batch.update(doc.ref, { status: 'available' }));
+    await batch.commit();
+    io.emit('new_round_started');
+    console.log('New round started manually by auctioneer.');
   });
 
   socket.on('make_bid', async ({ teamId }) => {
@@ -363,7 +437,7 @@ io.on('connection', (socket) => {
       }
 
       // SERVER-SIDE VALIDATION: Re-calculate maxBid and enforce it.
-      const maxBid = await calculateMaxBidForTeam(teamData, teamId);
+      const maxBid = await calculateMaxBidForTeam(teamData, teamId, currentAuction.player);
       if (maxBid < newBid) {
         console.log(`Bid rejected: Team ${teamData.name} cannot afford bid of ${newBid}. Max bid is ${maxBid}.`);
         socket.emit('bid_error', `You cannot afford this bid. Your maximum possible bid is ₹${maxBid}.`);
@@ -431,6 +505,131 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('start_mock_auction', async () => {
+    console.log(`--- Starting FAST Mock Auction for ALL players ---`);
+
+    try {
+      // 1. Get available teams
+      const teamsSnapshot = await db.collection('teams').get();
+      const teams = teamsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      if (teams.length < 2) {
+        console.log('Mock Auction Error: Need at least 2 teams to run a mock auction.');
+        socket.emit('mock_auction_error', 'Need at least 2 teams to run a mock auction.');
+        return;
+      }
+
+      let playersAuctioned = 0;
+      while (true) { // Loop until no players are left
+        // 2. Nominate a player
+        const auctioneerRef = db.collection('users').doc('auctioneer');
+        const auctioneerDoc = await auctioneerRef.get();
+        const isFixedAuction = auctioneerDoc.exists && auctioneerDoc.data().password === 'Anmol0503';
+
+        const nominationPool = await getNominationPool(isFixedAuction);
+
+        if (nominationPool.length === 0) {
+          console.log('Mock Auction: No more players to nominate. Auction complete.');
+          break; // Exit the while loop
+        }
+        const playerToNominate = nominationPool[Math.floor(Math.random() * nominationPool.length)];
+
+        // Set base price
+        if (playerToNominate.category === 'Platinum') {
+          playerToNominate.basePrice = currentAuction.settings.platinumBasePrice;
+        } else if (playerToNominate.category === 'Gold') {
+          playerToNominate.basePrice = currentAuction.settings.goldBasePrice;
+        } else if (playerToNominate.category === 'Diamond') {
+          playerToNominate.basePrice = currentAuction.settings.diamondBasePrice;
+        }
+
+        // Emit nomination event
+        stopTimer();
+        currentAuction.player = playerToNominate;
+        currentAuction.currentBid = playerToNominate.basePrice;
+        currentAuction.leadingTeamId = null;
+        currentAuction.bidHistory = [];
+        await auctionStateRef.set(currentAuction);
+        io.emit('player_nominated', playerToNominate);
+        io.emit('bid_update', { currentBid: currentAuction.currentBid, leadingTeamId: currentAuction.leadingTeamId });
+        console.log(`Mock Auction: Nominated ${playerToNominate.name}`);
+        await sleep(10); // Minimal delay
+
+        // 3. Simulate bidding war
+        let eligibleBidders = [];
+        for (const team of teams) {
+          const teamData = (await db.collection('teams').doc(team.id).get()).data();
+          const maxBidForTeam = await calculateMaxBidForTeam(teamData, team.id, playerToNominate);
+
+          // The hasReachedCategoryLimit check was removed to resolve an issue where
+          // the 'min...Players' setting was acting as a hard maximum, preventing
+          // players from being sold if all teams had met the minimum requirement.
+          if (maxBidForTeam >= playerToNominate.basePrice) {
+            let willingnessFactor = 0.5;
+            if (playerToNominate.category === 'Diamond') willingnessFactor = 0.8;
+            else if (playerToNominate.category === 'Platinum') willingnessFactor = 0.65;
+            willingnessFactor += (Math.random() * 0.2 - 0.1);
+            const willingToSpend = Math.max(playerToNominate.basePrice, Math.floor(maxBidForTeam * willingnessFactor));
+            eligibleBidders.push({ id: team.id, name: team.name, maxBid: willingToSpend });
+          }
+        }
+
+        console.log(`Mock Auction: ${eligibleBidders.length} eligible bidders for ${playerToNominate.name}`);
+        eligibleBidders.sort(() => 0.5 - Math.random());
+
+        if (eligibleBidders.length === 1 && currentAuction.leadingTeamId === null) {
+          const loneBidder = eligibleBidders[0];
+          currentAuction.currentBid = playerToNominate.basePrice;
+          currentAuction.leadingTeamId = loneBidder.id;
+          currentAuction.bidHistory.push({ teamId: loneBidder.id, bidAmount: playerToNominate.basePrice });
+          await auctionStateRef.set(currentAuction);
+          io.emit('bid_update', { currentBid: currentAuction.currentBid, leadingTeamId: currentAuction.leadingTeamId });
+          console.log(`Mock Auction: Lone bidder ${loneBidder.name} wins at base price.`);
+          await sleep(10);
+        } else {
+          let biddingWarActive = eligibleBidders.length >= 2;
+          while (biddingWarActive) {
+            let bidPlacedInRound = false;
+            for (const bidder of eligibleBidders) {
+              if (bidder.id === currentAuction.leadingTeamId) continue;
+
+              const increment = getBidIncrement(currentAuction.currentBid);
+              const nextBid = currentAuction.currentBid === 0 ? playerToNominate.basePrice : currentAuction.currentBid + increment;
+
+              if (bidder.maxBid >= nextBid) {
+                currentAuction.currentBid = nextBid;
+                currentAuction.leadingTeamId = bidder.id;
+                currentAuction.bidHistory.push({ teamId: bidder.id, bidAmount: nextBid });
+                await auctionStateRef.set(currentAuction);
+                io.emit('bid_update', { currentBid: currentAuction.currentBid, leadingTeamId: currentAuction.leadingTeamId });
+                console.log(`Mock Auction: Team ${bidder.name} bid ${nextBid}`);
+                await sleep(10); // Minimal delay between bids
+                bidPlacedInRound = true;
+              }
+            }
+
+            if (!bidPlacedInRound) biddingWarActive = false;
+
+            const nextIncrement = getBidIncrement(currentAuction.currentBid);
+            eligibleBidders = eligibleBidders.filter(b => b.maxBid >= currentAuction.currentBid + nextIncrement);
+
+            if (eligibleBidders.length < 2 && currentAuction.leadingTeamId !== null) {
+              biddingWarActive = false;
+            }
+          }
+        }
+
+        // 4. Sell the player
+        await sellPlayer();
+        playersAuctioned++;
+        await sleep(10); // Minimal delay before next player
+      }
+      socket.emit('mock_auction_complete', `Mock auction finished. ${playersAuctioned} players were auctioned.`);
+    } catch (error) {
+      console.error('Error during mock auction:', error);
+      socket.emit('mock_auction_error', 'An error occurred during the mock auction.');
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
   });
@@ -438,26 +637,107 @@ io.on('connection', (socket) => {
 
 const PORT = 3001;
 
+// Updated team names as requested
 const dummyTeams = [
-  { name: 'Mumbai Champions', ownerName: 'Akash', purse: 100000, pointsSpent: 0 },
-  { name: 'Delhi Dynamos', ownerName: 'Priya', purse: 100000, pointsSpent: 0 },
-  { name: 'Kolkata Knights', ownerName: 'Rohan', purse: 100000, pointsSpent: 0 },
-  { name: 'Chennai Kings', ownerName: 'Sana', purse: 100000, pointsSpent: 0 }
+  { name: 'Anmol Team', ownerName: 'Anmol' },
+  { name: 'Sourabh Raheja Team', ownerName: 'Sourabh' },
+  { name: 'Shubam Chichar Team', ownerName: 'Shubam' },
+  { name: 'Raghav Sahu Team', ownerName: 'Raghav' },
+  { name: 'Karan Shadija Team', ownerName: 'Karan' },
+  { name: 'Mohit Tolani Team', ownerName: 'Mohit' }
 ];
 
-async function populateTeams() {
+async function populateInitialData() {
   const batch = db.batch();
+  const initialPasswords = {};
+
+  // 1. Create Auctioneer User
+  const auctioneerPassword = 'Anmol0503'; // Hardcoded password as requested
+  const auctioneerRef = db.collection('users').doc('auctioneer');
+  // In a real app, you should HASH this password before storing it.
+  batch.set(auctioneerRef, { username: 'auctioneer', password: auctioneerPassword, role: 'auctioneer' });
+  initialPasswords['auctioneer'] = auctioneerPassword;
+
+  // 2. Create Teams and Team Owner Users
   dummyTeams.forEach(team => {
-    const docRef = db.collection('teams').doc();
-    // Add the initial booster count from settings when populating
-    const teamWithBoosters = {
-      ...team,
+    const teamId = db.collection('teams').doc().id; // Pre-generate ID to link user
+    const teamRef = db.collection('teams').doc(teamId);
+    const userRef = db.collection('users').doc(); // Firestore will generate an ID
+
+    const teamPassword = generatePassword();
+
+    // Team data
+    batch.set(teamRef, {
+      name: team.name,
+      ownerName: team.ownerName,
+      purse: 100000,
+      pointsSpent: 0,
       boostersAvailable: currentAuction.settings.initialBoostersPerTeam,
-    };
-    batch.set(docRef, teamWithBoosters);
+      platinumPlayersCount: 0,
+      goldPlayersCount: 0,
+      diamondPlayersCount: 0,
+    });
+
+    // User data for the team owner
+    // In a real app, you should HASH this password before storing it.
+    batch.set(userRef, {
+      username: team.ownerName.toLowerCase(),
+      password: teamPassword,
+      role: 'team_owner',
+      teamId: teamId // Link user to their team
+    });
+    initialPasswords[team.ownerName.toLowerCase()] = teamPassword;
   });
+
   await batch.commit();
+  return initialPasswords;
 }
+
+app.post('/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).send('Username and password are required.');
+    }
+
+    const usersRef = db.collection('users');
+    const snapshot = await usersRef.where('username', '==', username.toLowerCase()).limit(1).get();
+
+    if (snapshot.empty) {
+      return res.status(401).send('Invalid credentials.');
+    }
+
+    const userDoc = snapshot.docs[0];
+    const userData = userDoc.data();
+
+    // Plaintext password comparison. In a real app, use bcrypt.compare().
+    if (userData.password !== password) {
+      return res.status(401).send('Invalid credentials.');
+    }
+
+    // Prepare user object for the client, omitting the password
+    const userForClient = {
+      id: userDoc.id,
+      username: userData.username,
+      role: userData.role,
+    };
+
+    // If it's a team owner, enrich the object with team data
+    if (userData.role === 'team_owner') {
+      userForClient.teamId = userData.teamId;
+      const teamDoc = await db.collection('teams').doc(userData.teamId).get();
+      if (teamDoc.exists) {
+        Object.assign(userForClient, teamDoc.data());
+      }
+    }
+
+    res.status(200).json(userForClient);
+
+  } catch (error) {
+    console.error("Error during login:", error);
+    res.status(500).send("Server error during login.");
+  }
+});
 
 app.get('/teams', async (req, res) => {
   try {
@@ -467,6 +747,22 @@ app.get('/teams', async (req, res) => {
   } catch (error) {
     console.error("Error fetching teams:", error);
     res.status(500).send("Error fetching teams");
+  }
+});
+
+app.get('/users', async (req, res) => {
+  // This endpoint should be protected in a real app
+  try {
+    const snapshot = await db.collection('users').get();
+    const users = snapshot.docs.map(doc => {
+      const data = doc.data();
+      // IMPORTANT: Omit password from the response
+      return { id: doc.id, username: data.username, role: data.role };
+    });
+    res.json(users);
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).send("Error fetching users");
   }
 });
 
@@ -515,6 +811,220 @@ app.put('/players/:id', async (req, res) => {
   }
 });
 
+app.post('/users/:userId/reset-password', async (req, res) => {
+  // This endpoint should be protected and only accessible by an auctioneer
+  try {
+    const { userId } = req.params;
+    const userRef = db.collection('users').doc(userId);
+    const userDoc = await userRef.get();
+
+    if (!userDoc.exists) {
+      return res.status(404).send('User not found.');
+    }
+    if (userDoc.data().role === 'auctioneer') {
+      return res.status(403).send('Auctioneer password cannot be reset from the UI.');
+    }
+
+    const newPassword = generatePassword();
+    // In a real app, HASH the new password before updating
+    await userRef.update({ password: newPassword });
+
+    res.status(200).json({ message: 'Password reset successfully.', newPassword: newPassword });
+  } catch (error) {
+    console.error("Error resetting password:", error);
+    res.status(500).send("Server error during password reset.");
+  }
+});
+
+app.put('/teams/:teamId', async (req, res) => {
+  // This endpoint should be protected and only accessible by an auctioneer
+  try {
+    const { teamId } = req.params;
+    const { name, ownerName, purse } = req.body;
+    const teamRef = db.collection('teams').doc(teamId);
+
+    const updates = {};
+    if (name) updates.name = name;
+    if (ownerName) updates.ownerName = ownerName;
+    // Ensure purse is a number before updating
+    if (purse !== undefined && !isNaN(parseInt(purse, 10))) {
+      updates.purse = parseInt(purse, 10);
+    }
+
+    await teamRef.update(updates);
+
+    const updatedTeamDoc = await teamRef.get();
+    const updatedTeam = { id: updatedTeamDoc.id, ...updatedTeamDoc.data() };
+
+    // Notify all clients that a team has been updated
+    io.emit('team_updated', { updatedTeam });
+
+    res.status(200).json(updatedTeam);
+  } catch (error) {
+    console.error("Error updating team:", error);
+    res.status(500).send("Server error during team update.");
+  }
+});
+
+app.post('/players/:playerId/assign', async (req, res) => {
+  // This endpoint should be protected and only accessible by an auctioneer
+  try {
+    const { playerId } = req.params;
+    const { teamId, price } = req.body;
+
+    if (!teamId || price === undefined) {
+      return res.status(400).send('Team ID and price are required.');
+    }
+
+    const numericPrice = parseInt(price, 10);
+    if (isNaN(numericPrice) || numericPrice < 0) {
+      return res.status(400).send('Price must be a non-negative number.');
+    }
+
+    const playerDoc = await db.collection('players').doc(playerId).get();
+    if (!playerDoc.exists) return res.status(404).send('Player not found.');
+    const player = { id: playerDoc.id, ...playerDoc.data() };
+
+    await handleSellPlayerTransaction(player, numericPrice, teamId, []);
+    io.emit('force_refetch_data'); // Use the robust refetch event
+    res.status(200).send({ message: 'Player assigned successfully.' });
+  } catch (error) {
+    console.error("Error assigning player:", error);
+    res.status(500).send("Server error during player assignment.");
+  }
+});
+
+app.post('/players/:playerId/make-unsold', async (req, res) => {
+  // This endpoint should be protected and only accessible by an auctioneer
+  try {
+    const { playerId } = req.params;
+    const playerRef = db.collection('players').doc(playerId);
+
+    await db.runTransaction(async (transaction) => {
+      const playerDoc = await transaction.get(playerRef);
+      if (!playerDoc.exists || playerDoc.data().status !== 'sold') {
+        throw new Error('Player is not sold or does not exist.');
+      }
+      const playerData = playerDoc.data();
+      const oldTeamId = playerData.teamId;
+      const oldPrice = playerData.sellingPrice;
+
+      const teamRef = db.collection('teams').doc(oldTeamId);
+      const teamDoc = await transaction.get(teamRef);
+      if (!teamDoc.exists) throw new Error('Original team not found.');
+
+      // Refund the old team
+      transaction.update(teamRef, { purse: admin.firestore.FieldValue.increment(oldPrice) });
+      // Decrement player category count
+      const categoryField = `${playerData.category.toLowerCase()}PlayersCount`;
+      transaction.update(teamRef, { [categoryField]: admin.firestore.FieldValue.increment(-1) });
+
+      // Update player status
+      transaction.update(playerRef, {
+        status: 'unsold',
+        teamId: admin.firestore.FieldValue.delete(),
+        sellingPrice: admin.firestore.FieldValue.delete(),
+        soldAt: admin.firestore.FieldValue.delete(),
+      });
+    });
+
+    io.emit('force_refetch_data'); // Tell clients to refetch all data
+    res.status(200).send({ message: 'Player status reverted to unsold.' });
+  } catch (error) {
+    console.error("Error making player unsold:", error);
+    res.status(500).send(error.message || "Server error while reverting player sale.");
+  }
+});
+
+app.post('/players/:playerId/make-available', async (req, res) => {
+  // This endpoint should be protected and only accessible by an auctioneer
+  try {
+    const { playerId } = req.params;
+    const playerRef = db.collection('players').doc(playerId);
+
+    await db.runTransaction(async (transaction) => {
+      const playerDoc = await transaction.get(playerRef);
+      if (!playerDoc.exists || playerDoc.data().status !== 'sold') {
+        throw new Error('Player is not sold or does not exist.');
+      }
+      const playerData = playerDoc.data();
+      const oldTeamId = playerData.teamId;
+      const oldPrice = playerData.sellingPrice;
+
+      const teamRef = db.collection('teams').doc(oldTeamId);
+      const teamDoc = await transaction.get(teamRef);
+      if (!teamDoc.exists) throw new Error('Original team not found.');
+
+      // Refund the old team
+      transaction.update(teamRef, { purse: admin.firestore.FieldValue.increment(oldPrice) });
+      // Decrement player category count
+      const categoryField = `${playerData.category.toLowerCase()}PlayersCount`;
+      transaction.update(teamRef, { [categoryField]: admin.firestore.FieldValue.increment(-1) });
+
+      // Update player status to AVAILABLE
+      transaction.update(playerRef, {
+        status: 'available', // The key difference from 'make-unsold'
+        teamId: admin.firestore.FieldValue.delete(),
+        sellingPrice: admin.firestore.FieldValue.delete(),
+        soldAt: admin.firestore.FieldValue.delete(),
+        bidHistory: admin.firestore.FieldValue.delete(),
+      });
+    });
+
+    io.emit('force_refetch_data'); // Tell clients to refetch all data
+    res.status(200).send({ message: 'Player is now available for auction again.' });
+  } catch (error) {
+    console.error("Error making player available:", error);
+    res.status(500).send(error.message || "Server error while making player available.");
+  }
+});
+
+app.post('/players/:playerId/reassign', async (req, res) => {
+  // This endpoint should be protected and only accessible by an auctioneer
+  // This is a new, robust version that handles refunds correctly.
+  try {
+    const { playerId } = req.params;
+    const { newTeamId, price } = req.body;
+    const numericPrice = parseInt(price, 10);
+
+    if (!newTeamId || isNaN(numericPrice) || numericPrice < 0) {
+      return res.status(400).send('A valid new team and price are required.');
+    }
+
+    const playerRef = db.collection('players').doc(playerId);
+
+    await db.runTransaction(async (transaction) => {
+      const playerDoc = await transaction.get(playerRef);
+      if (!playerDoc.exists || playerDoc.data().status !== 'sold') {
+        throw new Error('Player is not sold or does not exist.');
+      }
+      const playerData = playerDoc.data();
+      const oldTeamId = playerData.teamId;
+      const oldPrice = playerData.sellingPrice;
+
+      // Step 1: Refund the original team if it exists
+      if (oldTeamId) {
+        const oldTeamRef = db.collection('teams').doc(oldTeamId);
+        const oldTeamDoc = await transaction.get(oldTeamRef);
+        if (oldTeamDoc.exists) {
+          transaction.update(oldTeamRef, { purse: admin.firestore.FieldValue.increment(oldPrice) });
+          const oldCategoryField = `${playerData.category.toLowerCase()}PlayersCount`;
+          transaction.update(oldTeamRef, { [oldCategoryField]: admin.firestore.FieldValue.increment(-1) });
+        }
+      }
+
+      // Step 2: Sell to the new team (this reuses the existing sell logic within a transaction)
+      await handleSellPlayerTransaction(playerData, numericPrice, newTeamId, playerData.bidHistory || [], transaction);
+    });
+
+    io.emit('force_refetch_data');
+    res.status(200).send({ message: 'Player reassigned successfully.' });
+  } catch (error) {
+    console.error("Error reassigning player:", error);
+    res.status(500).send(error.message || "Server error during player reassignment.");
+  }
+});
+
 app.delete('/players/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -560,15 +1070,6 @@ app.post('/players/bulk', async (req, res) => {
   }
 });
 
-app.get('/populate-teams', async (req, res) => {
-  try {
-    await populateTeams();
-    res.status(200).send("Successfully populated teams!");
-  } catch (error) {
-    res.status(500).send("Error populating teams.");
-  }
-});
-
 async function deleteCollection(db, collectionPath) {
   const collectionRef = db.collection(collectionPath);
   const snapshot = await collectionRef.get();
@@ -606,15 +1107,23 @@ app.get('/reset-auction', async (req, res) => {
       console.log('Cleared players collection.');
       await deleteCollection(db, 'teams');
       console.log('Cleared teams collection.');
+      await deleteCollection(db, 'users');
+      console.log('Cleared users collection.');
 
-      // 3. Repopulate teams (players will be added via UI)
-      await populateTeams();
+      // 3. Repopulate data and get new passwords
+      const initialPasswords = await populateInitialData();
+      console.log('--- Initial Passwords (Share with users) ---');
+      console.log(initialPasswords);
+      console.log('--------------------------------------------');
 
       // 4. Notify all connected clients to refresh
       io.emit('auction_reset');
       console.log('--- Auction Reset Complete ---');
 
-      res.status(200).send("Auction has been successfully reset. Please refresh your browser.");
+      res.status(200).json({
+        message: "Auction has been successfully reset. Initial passwords are logged on the server console. Please refresh your browser.",
+        initialPasswords: initialPasswords
+      });
   } catch (error) {
       console.error("Error resetting auction:", error);
       res.status(500).send("Error resetting auction.");

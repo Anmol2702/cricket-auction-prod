@@ -1,161 +1,105 @@
 import React, { createContext, useReducer, useContext } from 'react';
-import { toast } from 'react-toastify';
 
 const AuctionContext = createContext();
-
-// Restore user from localStorage
-const savedUser = localStorage.getItem('auctionUser');
-const initialUser = savedUser ? JSON.parse(savedUser) : null;
 
 const initialState = {
   players: [],
   teams: [],
+  soldPlayers: [],
+  unsoldPlayers: [],
   currentPlayer: null,
   currentBid: 0,
   leadingTeamId: null,
-  user: initialUser,
-  unsoldPlayers: [],
-  soldPlayers: [],
-  settings: {
-    timerDuration: 15,
-    platinumBasePrice: 3000,
-    goldBasePrice: 5000,
-    minPlatinumPlayers: 2,
-    minGoldPlayers: 3,
-    pointsPerBooster: 10000,
-    initialBoostersPerTeam: 3,
-    settingsSet: false,
-    bidIncrements: [
-      { from: 0, to: 10000, step: 1000 },
-      { from: 10000, to: 30000, step: 2000 },
-      { from: 30000, to: Infinity, step: 5000 },
-    ],
-  },
   timeLeft: 0,
+  user: JSON.parse(localStorage.getItem('user')), // Load user from localStorage
+  settings: {},
 };
 
 function auctionReducer(state, action) {
   switch (action.type) {
-    case 'SET_INITIAL_DATA': {
-      const allPlayers = action.payload.players;
-      const availablePlayers = allPlayers.filter(p => p.status === 'available');
-      const unsoldPlayers = allPlayers.filter(p => p.status === 'unsold');
-      const logPlayers = allPlayers
-        .filter(p => p.status === 'sold' || p.status === 'unsold')
-        .map(p => (p.status === 'sold' ? { ...p, price: p.sellingPrice, soldTo: p.teamId } : p))
-        .sort((a, b) => (b.soldAt?.seconds || 0) - (a.soldAt?.seconds || 0));
-
-      return {
-        ...state,
-        teams: action.payload.teams,
-        players: availablePlayers,
-        unsoldPlayers: unsoldPlayers,
-        soldPlayers: logPlayers,
-      };
-    }
     case 'LOGIN':
-      localStorage.setItem('auctionUser', JSON.stringify(action.payload));
+      localStorage.setItem('user', JSON.stringify(action.payload));
       return { ...state, user: action.payload };
     case 'LOGOUT':
-      localStorage.removeItem('auctionUser');
+      localStorage.removeItem('user');
       return { ...state, user: null };
-    case 'AUCTION_STATE_SYNC':
+    case 'SET_INITIAL_DATA':
+      const allPlayers = action.payload.players || [];
+      const soldPlayers = allPlayers.filter(p => p.status === 'sold');
+      const unsoldPlayers = allPlayers.filter(p => p.status === 'unsold');
+      const availablePlayers = allPlayers.filter(p => p.status === 'available');
       return {
         ...state,
-        currentPlayer: action.payload.player,
-        currentBid: action.payload.currentBid,
-        leadingTeamId: action.payload.leadingTeamId,
-        timeLeft: action.payload.timeLeft,
-        settings: action.payload.settings || state.settings,
+        teams: action.payload.teams || state.teams,
+        players: availablePlayers,
+        soldPlayers: soldPlayers,
+        unsoldPlayers: unsoldPlayers,
       };
+    case 'AUCTION_STATE_SYNC':
+      return { ...state, ...action.payload };
     case 'TIMER_UPDATE':
       return { ...state, timeLeft: action.payload };
     case 'PLAYER_NOMINATED':
-      return { ...state, currentPlayer: action.payload };
+      return { ...state, currentPlayer: action.payload, currentBid: action.payload.basePrice, leadingTeamId: null };
     case 'BID_UPDATE':
+      return { ...state, currentBid: action.payload.currentBid, leadingTeamId: action.payload.leadingTeamId };
+    case 'PLAYER_SOLD':
       return {
         ...state,
-        currentBid: action.payload.currentBid,
-        leadingTeamId: action.payload.leadingTeamId,
-      };
-    case 'PLAYER_SOLD': {
-      const { player, soldTo, price, updatedTeam, bidHistory } = action.payload;
-      const winningTeam = state.teams.find(t => t.id === soldTo);
-      if (winningTeam) toast.success(`${player.name} sold to ${winningTeam.name} for ₹${price}!`, {
-        toastId: `${player.id}-sold`,
-      });
-      
-      const newLogEntry = { ...player, soldTo, price, status: 'sold', bidHistory };
-
-      // Check if the logged-in user is the one who bought the player and update their state
-      let updatedUser = state.user;
-      if (state.user && state.user.teamId === soldTo) {
-        updatedUser = { ...state.user, ...updatedTeam };
-        localStorage.setItem('auctionUser', JSON.stringify(updatedUser)); // Persist change
-      }
-
-      return {
-        ...state,
-        // Use the authoritative team data from the server instead of calculating locally
-        teams: state.teams.map(team => (team.id === soldTo ? updatedTeam : team)),
-        players: state.players.filter(p => p.id !== player.id),
+        players: state.players.filter(p => p.id !== action.payload.player.id),
+        soldPlayers: [...state.soldPlayers, { 
+          ...action.payload.player, 
+          status: 'sold', 
+          sellingPrice: action.payload.price, 
+          soldTo: action.payload.soldTo,
+          // This is the crucial fix: add the bidHistory from the event payload
+          bidHistory: action.payload.bidHistory 
+        }],
+        teams: state.teams.map(t => t.id === action.payload.updatedTeam.id ? action.payload.updatedTeam : t),
         currentPlayer: null,
-        soldPlayers: [newLogEntry, ...state.soldPlayers],
-        user: updatedUser,
+        currentBid: 0,
+        leadingTeamId: null,
       };
-    }
-    case 'PLAYER_UNSOLD': {
-      const { player } = action.payload;
-      toast.info(`${player.name} went unsold at ₹${player.basePrice}.`, {
-        toastId: `${player.id}-unsold`,
-      });
-      const newLogEntry = { ...player, status: 'unsold' };
+    case 'PLAYER_UNSOLD':
       return {
         ...state,
+        players: state.players.filter(p => p.id !== action.payload.player.id),
+        unsoldPlayers: [...state.unsoldPlayers, { ...action.payload.player, status: 'unsold' }],
         currentPlayer: null,
-        players: state.players.filter(p => p.id !== player.id), // Remove from available
-        unsoldPlayers: [...state.unsoldPlayers, player], // Add to unsold
-        soldPlayers: [newLogEntry, ...state.soldPlayers],
+        currentBid: 0,
+        leadingTeamId: null,
       };
-    }
-    case 'NEW_ROUND_STARTED': {
-      toast.info("All unsold players are now available for nomination again!");
-      return {
-        ...state,
-        players: [...state.players, ...state.unsoldPlayers],
-        unsoldPlayers: [],
-      };
-    }
-    case 'BOOSTER_APPLIED': {
-      const { updatedTeam } = action.payload;
-      toast.success(`Booster applied to ${updatedTeam.name}!`, {
-        toastId: `${updatedTeam.id}-booster-${updatedTeam.boostersAvailable}`
-      });
-      
-      let updatedUser = state.user;
-      if (state.user && state.user.teamId === updatedTeam.id) {
-          updatedUser = { ...state.user, ...updatedTeam };
-          localStorage.setItem('auctionUser', JSON.stringify(updatedUser));
-      }
-  
-      return {
-          ...state,
-          teams: state.teams.map(team => team.id === updatedTeam.id ? updatedTeam : team),
-          user: updatedUser,
-      };
-    }
+    case 'NEW_ROUND_STARTED':
+        return {
+            ...state,
+            unsoldPlayers: [], // Clear unsold players for the new round
+            players: [...state.players, ...state.unsoldPlayers.map(p => ({...p, status: 'available'}))]
+        };
+    case 'BOOSTER_APPLIED':
+        return {
+            ...state,
+            teams: state.teams.map(t => t.id === action.payload.updatedTeam.id ? action.payload.updatedTeam : t),
+        };
+    // This is the new case for handling on-the-fly team edits
+    case 'TEAM_UPDATED':
+        return {
+            ...state,
+            teams: state.teams.map(team =>
+            team.id === action.payload.updatedTeam.id ? action.payload.updatedTeam : team
+            ),
+        };
     default:
       return state;
   }
 }
 
-export function AuctionProvider({ children }) {
+export const AuctionProvider = ({ children }) => {
   const [state, dispatch] = useReducer(auctionReducer, initialState);
   return (
     <AuctionContext.Provider value={{ state, dispatch }}>
       {children}
     </AuctionContext.Provider>
   );
-}
+};
 
 export const useAuction = () => useContext(AuctionContext);

@@ -2,7 +2,7 @@
 
 import React from 'react';
 
-function AuctioneerControls({ onSell, onNominateRandom, onReset, currentPlayer, leadingTeamId }) {
+function AuctioneerControls({ onSell, onNominateRandom, onReset, onMock, onHardcodeAssign, onNewRound, isMocking, currentPlayer, leadingTeamId, unsoldPlayers }) {
   // The "End Auction" button should be clickable as soon as a player is nominated.
   const canEndAuction = !!currentPlayer;
   // The "Nominate" button should only be clickable if there is NO player currently being auctioned.
@@ -15,7 +15,7 @@ function AuctioneerControls({ onSell, onNominateRandom, onReset, currentPlayer, 
       <button
         onClick={onNominateRandom}
         className="nominate-random-btn"
-        disabled={!canNominate}
+        disabled={!canNominate || isMocking}
       >
         Nominate Random Player
       </button>
@@ -27,8 +27,30 @@ function AuctioneerControls({ onSell, onNominateRandom, onReset, currentPlayer, 
         {endAuctionButtonText}
       </button>
       <button
+        onClick={onMock}
+        className="mock-btn"
+        disabled={isMocking}
+      >
+        {isMocking ? 'Mocking in Progress...' : 'Mock Auction'}
+      </button>
+      <button
+        onClick={onNewRound}
+        className="start-round-btn"
+        disabled={isMocking || !unsoldPlayers || unsoldPlayers.length === 0}
+      >
+        Start New Round
+      </button>
+      <button
+        onClick={onHardcodeAssign}
+        className="hardcode-btn"
+        disabled={isMocking}
+      >
+        Assign Core Players
+      </button>
+      <button
         onClick={onReset}
         className="reset-btn"
+        disabled={isMocking}
       >
         Reset Auction
       </button>

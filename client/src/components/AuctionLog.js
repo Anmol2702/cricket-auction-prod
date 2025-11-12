@@ -3,21 +3,11 @@ import './AuctionLog.css';
 import BidHistoryModal from './BidHistoryModal';
 
 const AuctionLog = ({ soldPlayers, teams }) => {
-  const [historyPlayer, setHistoryPlayer] = useState(null);
+  const [viewingHistoryFor, setViewingHistoryFor] = useState(null);
 
   const getTeamName = (teamId) => {
     const team = teams.find(t => t.id === teamId);
     return team ? team.name : 'Unknown Team';
-  };
-
-  const handleShowHistory = (player) => {
-    if (player.status === 'sold' && player.bidHistory) {
-      setHistoryPlayer(player);
-    }
-  };
-
-  const handleCloseHistory = () => {
-    setHistoryPlayer(null);
   };
 
   return (
@@ -28,12 +18,17 @@ const AuctionLog = ({ soldPlayers, teams }) => {
           {soldPlayers.length === 0 ? (
             <p className="empty-log">No players sold yet.</p>
           ) : (
-            soldPlayers.map((entry, index) => (
-              <div key={index} className={`log-entry ${entry.status} ${entry.status === 'sold' ? 'clickable' : ''}`} onClick={() => handleShowHistory(entry)}>
-                <span className="player-name">{entry.name}</span>
-                {entry.status === 'sold' ? (
+            // Reverse the array to show most recent sales first
+            soldPlayers.slice().reverse().map((player) => (
+              <div 
+                key={player.id} // Use a stable key
+                className={`log-entry ${player.status} ${player.status === 'sold' ? 'clickable' : ''}`} 
+                onClick={() => player.status === 'sold' && setViewingHistoryFor(player)}
+              >
+                <span className="player-name">{player.name}</span>
+                {player.status === 'sold' ? (
                   <span className="sale-info">
-                    Sold to <strong>{getTeamName(entry.soldTo)}</strong> for <strong>₹{entry.price}</strong>
+                    Sold to <strong>{getTeamName(player.soldTo || player.teamId)}</strong> for <strong>₹{player.sellingPrice}</strong>
                   </span>
                 ) : (
                   <span className="sale-info">
@@ -45,7 +40,13 @@ const AuctionLog = ({ soldPlayers, teams }) => {
           )}
         </div>
       </div>
-      <BidHistoryModal player={historyPlayer} teams={teams} onClose={handleCloseHistory} />
+      {viewingHistoryFor && (
+        <BidHistoryModal 
+          player={viewingHistoryFor} 
+          teams={teams} 
+          onClose={() => setViewingHistoryFor(null)} 
+        />
+      )}
     </>
   );
 };

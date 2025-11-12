@@ -1,0 +1,30 @@
+.start-round-button {
+  background-color: #007bff; /* A nice blue */
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  font-size: 16px;
+  font-weight: bold;
+  margin: 10px 5px;
+  cursor: pointer;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2);
+  transition: all 0.3s ease;
+}
+
+.start-round-button:hover {
+  background-color: #0056b3; /* A darker blue on hover */
+  box-shadow: 0 6px 12px 0 rgba(0,0,0,0.3);
+  transform: translateY(-2px);
+}
+
+.start-round-button:disabled {
+  background-color: #cccccc;
+  color: #666666;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}

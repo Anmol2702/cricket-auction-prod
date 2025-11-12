@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import Papa from 'papaparse';
 import { useAuction } from '../context/AuctionContext';
+import AssignPlayerModal from './AssignPlayerModal';
+import ReassignPlayerModal from './ReassignPlayerModal';
 import './PlayerManagement.css';
 import { toast } from 'react-toastify';
-
-const serverUrl = process.env.NODE_ENV === 'production' ? 'https://cricket-auction-server.onrender.com' : `http://${window.location.hostname}:3001`;
 
 const DEFAULT_FORM_STATE = {
   name: '',
@@ -14,22 +14,27 @@ const DEFAULT_FORM_STATE = {
   category: 'Gold',
 };
 
-function PlayerManagement({ onDataChange }) {
+function PlayerManagement({ onDataChange, serverUrl }) {
   const { state } = useAuction();
-  const { players } = state;
+  const { players, soldPlayers, unsoldPlayers } = state;
   const [formState, setFormState] = useState(DEFAULT_FORM_STATE);
   const [editingPlayerId, setEditingPlayerId] = useState(null);
+  const [reassigningPlayer, setReassigningPlayer] = useState(null);
+  const [assigningPlayer, setAssigningPlayer] = useState(null);
+
+  // Combine all players into a single list for management purposes and sort them alphabetically.
+  const allPlayers = [...players, ...soldPlayers, ...unsoldPlayers].sort((a, b) => a.name.localeCompare(b.name));
 
   useEffect(() => {
     if (editingPlayerId) {
-      const playerToEdit = players.find(p => p.id === editingPlayerId);
+      const playerToEdit = allPlayers.find(p => p.id === editingPlayerId);
       if (playerToEdit) {
         setFormState(playerToEdit);
       }
     } else {
       setFormState(DEFAULT_FORM_STATE);
     }
-  }, [editingPlayerId, players]);
+  }, [editingPlayerId, allPlayers]);
 
   const handleChange = (e) => {
     setFormState({ ...formState, [e.target.name]: e.target.value });
@@ -77,6 +82,53 @@ function PlayerManagement({ onDataChange }) {
   const cancelEdit = () => {
     setEditingPlayerId(null);
     setFormState(DEFAULT_FORM_STATE);
+  };
+
+  const handleMakeUnsold = async (playerId, playerName) => {
+    if (window.confirm(`Are you sure you want to make ${playerName} UNSOLD? This will refund the original team.`)) {
+      try {
+        await axios.post(`${serverUrl}/players/${playerId}/make-unsold`);
+        toast.success(`${playerName} is now unsold.`);
+      } catch (error) {
+        toast.error(error.response?.data || 'Failed to make player unsold.');
+      }
+    }
+  };
+
+  const handleMakeAvailable = async (playerId, playerName) => {
+    if (window.confirm(`Are you sure you want to make ${playerName} AVAILABLE again? This will refund the original team and put the player back in the auction pool.`)) {
+      try {
+        await axios.post(`${serverUrl}/players/${playerId}/make-available`);
+        toast.success(`${playerName} is now available again.`);
+        // Server will force a refetch, no need to call onDataChange()
+      } catch (error) {
+        toast.error(error.response?.data || 'Failed to make player available.');
+      }
+    }
+  };
+
+  const handleReassign = async (playerId, { newTeamId, price }) => {
+    try {
+      await axios.post(`${serverUrl}/players/${playerId}/reassign`, { newTeamId, price });
+      toast.success(`Player successfully re-assigned.`);
+      setReassigningPlayer(null); // Close modal
+      // The server will emit a 'force_refetch_data' event, so no need to call onDataChange() here.
+    } catch (error) {
+      console.error("Error re-assigning player:", error);
+      toast.error(error.response?.data || "Failed to re-assign player.");
+    }
+  };
+
+  const handleAssign = async (playerId, { teamId, price }) => {
+    try {
+      await axios.post(`${serverUrl}/players/${playerId}/assign`, { teamId, price });
+      toast.success(`Player assigned successfully.`);
+      setAssigningPlayer(null); // Close modal
+      onDataChange(); // Refresh data
+    } catch (error) {
+      console.error("Error assigning player:", error);
+      toast.error(error.response?.data || "Failed to assign player.");
+    }
   };
 
   const handleFileImport = (e) => {
@@ -129,6 +181,21 @@ function PlayerManagement({ onDataChange }) {
 
   return (
     <div className="player-management-container">
+      {assigningPlayer && (
+        <AssignPlayerModal
+          player={assigningPlayer}
+          onClose={() => setAssigningPlayer(null)}
+          onAssign={handleAssign}
+        />
+      )}
+      {reassigningPlayer && (
+        <ReassignPlayerModal
+          player={reassigningPlayer}
+          onClose={() => setReassigningPlayer(null)}
+          onReassign={handleReassign}
+        />
+      )}
+
       <div className="player-import-card">
         <h2>Import Players from CSV</h2>
         <p>Upload a CSV file with columns: <strong>Name, Category, Skill, Country</strong>. 'Name' and 'Category' are required.</p>
@@ -166,7 +233,7 @@ function PlayerManagement({ onDataChange }) {
       </div>
 
       <div className="player-list-card">
-        <h2>All Players ({players.length})</h2>
+        <h2>All Players ({allPlayers.length})</h2>
         <div className="player-list-table-container">
           <table>
             <thead>
@@ -179,7 +246,7 @@ function PlayerManagement({ onDataChange }) {
               </tr>
             </thead>
             <tbody>
-              {players.map(player => (
+              {allPlayers.map(player => (
                 <tr key={player.id}>
                   <td>{player.name}</td>
                   <td><span className={`player-category ${player.category}`}>{player.category}</span></td>
@@ -187,6 +254,18 @@ function PlayerManagement({ onDataChange }) {
                   <td>{player.status}</td>
                   <td className="player-actions">
                     <button onClick={() => setEditingPlayerId(player.id)} className="edit-btn">Edit</button>
+                    {player.status === 'available' && (
+                      <button onClick={() => setAssigningPlayer(player)} className="assign-btn">Assign</button>
+                    )}
+                    {player.status === 'sold' && (
+                      <button onClick={() => setReassigningPlayer(player)} className="reassign-btn">Re-assign</button>
+                    )}
+                    {player.status === 'sold' && (
+                      <button onClick={() => handleMakeAvailable(player.id, player.name)} className="make-available-btn">Make Available</button>
+                    )}
+                    {player.status === 'sold' && (
+                      <button onClick={() => handleMakeUnsold(player.id, player.name)} className="make-unsold-btn">Make Unsold</button>
+                    )}
                     <button onClick={() => handleDelete(player.id, player.name)} className="delete-btn">Delete</button>
                   </td>
                 </tr>
